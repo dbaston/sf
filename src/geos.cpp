@@ -706,7 +706,7 @@ Rcpp::List CPL_geos_op2(std::string op, Rcpp::List sfcx, Rcpp::List sfcy) {
 				if (! chk_(GEOSisEmpty_r(hGEOSCtxt, geom.get()))) {
 					index_x.push_back(j + 1);
 					index_y.push_back(i + 1);
-					out.push_back(geom); // keep
+					out.push_back(std::move(geom)); // keep
 				}
 				R_CheckUserInterrupt();
 			}
@@ -732,7 +732,7 @@ Rcpp::List CPL_geos_op2(std::string op, Rcpp::List sfcx, Rcpp::List sfcy) {
 				if (! chk_(GEOSisEmpty_r(hGEOSCtxt, geom.get()))) {
 					index_x.push_back(j + 1);
 					index_y.push_back(i + 1);
-					out.push_back(geom); // keep
+					out.push_back(std::move(geom)); // keep
 				}
 				R_CheckUserInterrupt();
 			}
@@ -894,7 +894,7 @@ Rcpp::List CPL_nary_difference(Rcpp::List sfc) {
 		if (! GEOSisEmpty_r(hGEOSCtxt, x[i].get())) {
 			bool contained = false;
 			GEOSSTRtree *tree = GEOSSTRtree_create_r(hGEOSCtxt, 10);
-			const GEOSGeometry* geom = x[i].get();
+			GeomPtr geom = std::move(x[i]);
 			// if out contains geometries than remove overlaps from geom
 			if (out.size() > 0) {
 				// generate tree for all items in out
@@ -906,23 +906,20 @@ Rcpp::List CPL_nary_difference(Rcpp::List sfc) {
 					}
 				}
 				// query which geometries in out overlap with geom
-				contained = false;
 				std::vector<size_t> tree_sel;
-				GEOSSTRtree_query_r(hGEOSCtxt, tree, geom, cb, &tree_sel);
+				GEOSSTRtree_query_r(hGEOSCtxt, tree, geom.get(), cb, &tree_sel);
 				// iterate over items in query and erase overlapping areas in geom
 				for (size_t j = 0; j < tree_sel.size(); j++) {
 					// test if the items are fully contained
-					contained = chk_(GEOSContains_r(hGEOSCtxt, out[tree_sel[j]].get(), geom));
+					contained = chk_(GEOSContains_r(hGEOSCtxt, out[tree_sel[j]].get(), geom.get()));
 					if (contained)
 						break;
 					// test if the items overlap with geom
-					if (chk_(GEOSOverlaps_r(hGEOSCtxt, geom, out[tree_sel[j]]))) {
+					if (chk_(GEOSOverlaps_r(hGEOSCtxt, geom.get(), out[tree_sel[j]].get()))) {
 						// if they do then erase overlapping parts from geom
-						GEOSGeom g = GEOSDifference_r(hGEOSCtxt, geom, out[tree_sel[j]].get());
-						if (g == NULL)
+						geom = std::move(make_geom_ptr(GEOSDifference_r(hGEOSCtxt, geom.get(), out[tree_sel[j]].get()), hGEOSCtxt));
+						if (geom == nullptr)
 							Rcpp::stop("GEOS exception"); // #nocov
-						GEOSGeom_destroy_r(hGEOSCtxt, geom); // discard
-						geom = g;
 						// ensure that geom is valid
 					}
 				}
@@ -930,9 +927,8 @@ Rcpp::List CPL_nary_difference(Rcpp::List sfc) {
 			// add geom to out if not empty
 			if (!contained) {
 				index.push_back(i + 1);
-				out.push_back(geom); // keep
-			} else
-				GEOSGeom_destroy_r(hGEOSCtxt, geom); // discard
+				out.push_back(std::move(geom)); // keep
+			}
 			// destroy tree
 			GEOSSTRtree_destroy_r(hGEOSCtxt, tree);
 			// check for user interrupt
@@ -963,7 +959,7 @@ Rcpp::List CPL_nary_intersection(Rcpp::List sfc) {
 		// if i'th geometry in x is empty then skip it
 		if (! GEOSisEmpty_r(hGEOSCtxt, x[i].get())) {
 			GEOSSTRtree *tree = GEOSSTRtree_create_r(hGEOSCtxt, 10);
-			GEOSGeom geom = x[i];
+			GeomPtr geom = std::move(x[i]);
 			// if out contains geometries than remove overlaps from geom
 			if (out.size() > 0) {
 				// generate tree for all items in out
@@ -976,40 +972,35 @@ Rcpp::List CPL_nary_intersection(Rcpp::List sfc) {
 				}
 				// query which geometries in out overlap with geom
 				std::vector<size_t> tree_sel;
-				GEOSSTRtree_query_r(hGEOSCtxt, tree, geom, cb, &tree_sel);
+				GEOSSTRtree_query_r(hGEOSCtxt, tree, geom.get(), cb, &tree_sel);
 				// iterate over items in query and erase overlapping areas in geom
 				for (size_t j = 0; j < tree_sel.size(); j++) {
 					size_t k = tree_sel[j];
 					// test if the items are fully contained
-					GEOSGeom inters = GEOSIntersection_r(hGEOSCtxt, out[k], geom);
-					if (inters == NULL)
+					GeomPtr inters = make_geom_ptr(GEOSIntersection_r(hGEOSCtxt, out[k].get(), geom.get()), hGEOSCtxt);
+					if (inters == nullptr)
 						Rcpp::stop("GEOS exception"); // #nocov
-					if (! chk_(GEOSisEmpty_r(hGEOSCtxt, inters))) { // i and k intersection
-						GEOSGeom g = GEOSDifference_r(hGEOSCtxt, geom, inters); // cut out inters from geom
-						if (g == NULL)
+					if (! chk_(GEOSisEmpty_r(hGEOSCtxt, inters.get()))) { // i and k intersection
+						geom = std::move(make_geom_ptr(GEOSDifference_r(hGEOSCtxt, geom.get(), inters.get()), hGEOSCtxt)); // cut out inters from geom
+						if (geom == nullptr)
 							Rcpp::stop("GEOS exception"); // #nocov
-						GEOSGeom_destroy_r(hGEOSCtxt, geom);
-						geom = g;
-						g = GEOSDifference_r(hGEOSCtxt, out[k], inters); // cut out inters from out[k]
-						if (g == NULL)
+						GeomPtr g = make_geom_ptr(GEOSDifference_r(hGEOSCtxt, out[k].get(), inters.get()), hGEOSCtxt); // cut out inters from out[k]
+						if (g == nullptr)
 							Rcpp::stop("GEOS exception"); // #nocov
-						GEOSGeom_destroy_r(hGEOSCtxt, out[k]);
-						out[k] = g;
-						out.push_back(inters); // keep
+						out[k] = std::move(g);
+						out.push_back(std::move(inters)); // keep
 						std::vector<size_t> idx = index[k]; // k < i, and k might already be an intersection
 						idx.push_back(i + 1);
 						index.push_back(idx);
-					} else
-						GEOSGeom_destroy_r(hGEOSCtxt, inters); // discard
+					}
 				}
 			}
-			if (! chk_(GEOSisEmpty_r(hGEOSCtxt, geom))) {
-				out.push_back(geom);
+			if (! chk_(GEOSisEmpty_r(hGEOSCtxt, geom.get()))) {
+				out.push_back(std::move(geom));
 				std::vector<size_t> idx;
 				idx.push_back(i + 1);
 				index.push_back(idx);
-			} else
-				GEOSGeom_destroy_r(hGEOSCtxt, geom); // discard
+			}
 			// destroy tree
 			GEOSSTRtree_destroy_r(hGEOSCtxt, tree);
 			// check for user interrupt
@@ -1019,7 +1010,7 @@ Rcpp::List CPL_nary_intersection(Rcpp::List sfc) {
 	size_t j = 0;
 	for (size_t i = 0; i < out.size(); i++) {
 	if (! GEOSisEmpty_r(hGEOSCtxt, out[i].get()))
-		out[j] = out[i];
+		out[j] = std::move(out[i]);
 		index[j] = index[i];
 		std::sort(index[j].begin(), index[j].end());
 		j++;
@@ -1027,7 +1018,7 @@ Rcpp::List CPL_nary_intersection(Rcpp::List sfc) {
 	out.resize(j);
 	index.resize(j);
 	// prepare output
-	Rcpp::List ret(sfc_from_geometry(hGEOSCtxt, out, dim)); // destroys out
+	Rcpp::List ret(sfc_from_geometry(hGEOSCtxt, out, dim));
 	ret.attr("crs") = sfc.attr("crs");
 	Rcpp::List index_list(index.size());
 	for (size_t i = 0; i < index.size(); i++) {
